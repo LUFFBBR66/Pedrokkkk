@@ -1,1 +1,1 @@
-// Arquivo vazio de propósito (plugins agora ficam no settings + app)
+// Root build file - plugins are declared in app/build.gradle
