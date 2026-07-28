@@ -1,0 +1,114 @@
+
+package com.ghost.facelandmarker
+
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Bundle
+import android.util.Log
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.core.AspectRatio
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.core.content.ContextCompat
+import com.ghost.facelandmarker.databinding.ActivityMainBinding
+import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarkerResult
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+
+class MainActivity : AppCompatActivity(), FaceLandmarkerHelper.LandmarkerListener {
+
+    private lateinit var binding: ActivityMainBinding
+    private lateinit var cameraExecutor: ExecutorService
+    private var faceLandmarkerHelper: FaceLandmarkerHelper? = null
+    private var cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
+    private var isFrontCamera = true
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        cameraExecutor = Executors.newSingleThreadExecutor()
+        
+        // Inicializa o helper no background para não travar a UI
+        cameraExecutor.execute {
+            faceLandmarkerHelper = FaceLandmarkerHelper(this, this)
+        }
+
+        binding.btnSwitch.setOnClickListener {
+            isFrontCamera = !isFrontCamera
+            cameraSelector = if (isFrontCamera) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA
+            startCamera()
+        }
+
+        if (allPermissionsGranted()) {
+            startCamera()
+        } else {
+            requestPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    private fun startCamera() {
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
+        cameraProviderFuture.addListener({
+            val cameraProvider = cameraProviderFuture.get()
+
+            val preview = Preview.Builder()
+                .setTargetAspectRatio(AspectRatio.RATIO_4_3)
+                .build()
+                .also {
+                    it.setSurfaceProvider(binding.previewView.surfaceProvider)
+                }
+
+            val imageAnalyzer = ImageAnalysis.Builder()
+                .setTargetAspectRatio(AspectRatio.RATIO_4_3)
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+                .build()
+                .also {
+                    it.setAnalyzer(cameraExecutor) { imageProxy ->
+                        faceLandmarkerHelper?.detectLiveStream(imageProxy, isFrontCamera)
+                    }
+                }
+
+            try {
+                cameraProvider.unbindAll()
+                cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageAnalyzer)
+            } catch (e: Exception) {
+                Log.e("FaceLandmarker", "Falha ao iniciar câmera", e)
+            }
+
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    override fun onResults(result: FaceLandmarkerResult, inputWidth: Int, inputHeight: Int, inferenceTime: Long) {
+        runOnUiThread {
+            binding.overlayView.setResults(result, inputWidth, inputHeight)
+            val numFaces = result.faceLandmarks().size
+            binding.tvInfo.text = "Inferência: ${inferenceTime}ms | Rostos: $numFaces"
+        }
+    }
+
+    override fun onError(error: String) {
+        Log.e("FaceLandmarker", error)
+    }
+
+    private fun allPermissionsGranted() = ContextCompat.checkSelfPermission(
+        this, Manifest.permission.CAMERA
+    ) == PackageManager.PERMISSION_GRANTED
+
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) startCamera()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        cameraExecutor.shutdown()
+        faceLandmarkerHelper?.clear()
+    }
+}
