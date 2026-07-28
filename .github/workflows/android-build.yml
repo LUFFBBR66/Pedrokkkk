@@ -1,1 +1,39 @@
 
+name: Build Android APK
+
+on:
+  push:
+    branches: [ "main" ] # Executa toda vez que tiver commit na branch main
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. Baixa o código do seu repositório
+    - name: Checkout do código
+      uses: actions/checkout@v4
+
+    # 2. Configura a versão do Java (ex: Java 17)
+    - name: Configurar Java JDK
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    # 3. Dá permissão de execução para o Gradle Wrapper
+    - name: Dar permissão de execução ao Gradlew
+      run: chmod +x gradlew
+
+    # 4. Compila o projeto e gera o APK de Debug
+    - name: Compilar APK (Build)
+      run: ./gradlew assembleDebug
+
+    # 5. Salva o APK gerado para você conseguir baixar no GitHub
+    - name: Disponibilizar APK para download
+      uses: actions/upload-artifact@v4
+      with:
+        name: app-debug
+        path: app/build/outputs/apk/debug/app-debug.apk
